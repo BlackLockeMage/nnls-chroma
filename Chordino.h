@@ -56,6 +56,17 @@ protected:
     vector<vector<int> > m_chordnotes;
     vector<string> m_chordnames;
     bool m_extendedTemplates;
+    float m_weakThird;
+    int m_thirdGate;
+    bool m_diagnostics;
+    vector<float> m_weakChorddict;
+    vector<bool> m_weakEligible;
+    vector<int> m_scoreGroups;
+    mutable int m_outputDecoderChroma;
+    mutable int m_outputTriadScores;
+    mutable int m_outputNoteActivations;
+    void prepareWeakThirdTemplates();
+    bool permitsWeakThird(int group, const vector<float> &notes) const;
 };
 
 
