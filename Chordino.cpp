@@ -34,7 +34,9 @@ Chordino::Chordino(float inputSampleRate) :
     m_chorddict(0),
     m_chordnotes(0),
     m_chordnames(0),
-    m_extendedTemplates(true)
+    m_extendedTemplates(true),
+    m_weakThird(0.f),
+    m_diagnostics(false)
 {
     if (debug_on) cerr << "--> Chordino" << endl;
 }
@@ -68,7 +70,7 @@ Chordino::getDescription() const
 int
 Chordino::getPluginVersion() const
 {
-    return 6;
+    return 7;
 }
 
 Chordino::ParameterList
@@ -177,6 +179,30 @@ Chordino::getParameterDescriptors() const
     extendedParam.valueNames.push_back("yes");
     list.push_back(extendedParam);
 
+    ParameterDescriptor weakThirdParam;
+    weakThirdParam.identifier = "weakthird";
+    weakThirdParam.name = "experimental weak-third voicing";
+    weakThirdParam.description = "Experimental plain-triad score alternative: 0 disables it; 0.25, 0.5 or 0.75 scales third-note bass and treble weights before renormalization. No key constraints or new HMM states.";
+    weakThirdParam.unit = "";
+    weakThirdParam.minValue = 0.f;
+    weakThirdParam.maxValue = 0.75f;
+    weakThirdParam.defaultValue = 0.f;
+    weakThirdParam.isQuantized = true;
+    weakThirdParam.quantizeStep = 0.25f;
+    list.push_back(weakThirdParam);
+
+    ParameterDescriptor diagnosticsParam;
+    diagnosticsParam.identifier = "diagnostics";
+    diagnosticsParam.name = "emit decoder diagnostics";
+    diagnosticsParam.description = "Emit the exact 24 bass/treble scoring inputs and 36 best raw major/minor/power template scores. Disabled by default.";
+    diagnosticsParam.unit = "";
+    diagnosticsParam.minValue = 0.f;
+    diagnosticsParam.maxValue = 1.f;
+    diagnosticsParam.defaultValue = 0.f;
+    diagnosticsParam.isQuantized = true;
+    diagnosticsParam.quantizeStep = 1.f;
+    list.push_back(diagnosticsParam);
+
     return list;
 }
 
@@ -184,12 +210,23 @@ float
 Chordino::getParameter(string identifier) const
 {
     if (identifier == "extendedchords") return m_extendedTemplates ? 1.f : 0.f;
+    if (identifier == "weakthird") return m_weakThird;
+    if (identifier == "diagnostics") return m_diagnostics ? 1.f : 0.f;
     return NNLSBase::getParameter(identifier);
 }
 
 void
 Chordino::setParameter(string identifier, float value)
 {
+    if (identifier == "weakthird") {
+        m_weakThird = (value == 0.25f || value == 0.5f || value == 0.75f) ? value : 0.f;
+        if (!m_chordnames.empty()) prepareWeakThirdTemplates();
+        return;
+    }
+    if (identifier == "diagnostics") {
+        m_diagnostics = value >= 0.5f;
+        return;
+    }
     if (identifier == "extendedchords") {
         m_extendedTemplates = value >= 0.5f;
         return;
@@ -270,6 +307,48 @@ Chordino::getOutputDescriptors() const
     loglikelihood.hasDuration = false;
     list.push_back(loglikelihood);
     m_outputLoglikelihood = index++;
+
+    const char *roots[] = {"A", "Bb", "B", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab"};
+    OutputDescriptor decoderChroma;
+    decoderChroma.identifier = "decoderchroma";
+    decoderChroma.name = "Experimental Decoder Chroma";
+    decoderChroma.description = "Exact scoring inputs: bass A..Ab, then treble A..Ab. Emitted only with diagnostics enabled; no diagnostic normalization is applied.";
+    decoderChroma.unit = "NNLS activation";
+    decoderChroma.hasFixedBinCount = true;
+    decoderChroma.binCount = 24;
+    decoderChroma.hasKnownExtents = false;
+    decoderChroma.isQuantized = false;
+    decoderChroma.sampleType = OutputDescriptor::FixedSampleRate;
+    decoderChroma.sampleRate = featureRate;
+    decoderChroma.hasDuration = false;
+    for (int band = 0; band < 2; ++band) {
+        for (int root = 0; root < 12; ++root) {
+            decoderChroma.binNames.push_back(string(band == 0 ? "bass " : "treble ") + roots[root]);
+        }
+    }
+    list.push_back(decoderChroma);
+    m_outputDecoderChroma = index++;
+
+    OutputDescriptor triadScores;
+    triadScores.identifier = "triadscores";
+    triadScores.name = "Experimental Triad and Power Scores";
+    triadScores.description = "Best effective raw score across voicing states, before clipping or exponentiation. Bins: major A..Ab, minor A..Ab, power A..Ab; zero for absent candidates. Emitted only with diagnostics enabled. These are not probabilities.";
+    triadScores.unit = "template similarity";
+    triadScores.hasFixedBinCount = true;
+    triadScores.binCount = 36;
+    triadScores.hasKnownExtents = false;
+    triadScores.isQuantized = false;
+    triadScores.sampleType = OutputDescriptor::FixedSampleRate;
+    triadScores.sampleRate = featureRate;
+    triadScores.hasDuration = false;
+    const char *suffixes[] = {"", "m", "5"};
+    for (int group = 0; group < 3; ++group) {
+        for (int root = 0; root < 12; ++root) {
+            triadScores.binNames.push_back(string(roots[root]) + suffixes[group]);
+        }
+    }
+    list.push_back(triadScores);
+    m_outputTriadScores = index++;
   
     return list;
 }
@@ -286,7 +365,55 @@ Chordino::initialise(size_t channels, size_t stepSize, size_t blockSize)
     }
     m_chordnames = chordDictionary(&m_chorddict, &m_chordnotes, m_boostN,
                                   m_harte_syntax, m_extendedTemplates);
+    prepareWeakThirdTemplates();
     return true;
+}
+
+void
+Chordino::prepareWeakThirdTemplates()
+{
+    const char *roots[] = {"A", "Bb", "B", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab"};
+    const char *suffixes[] = {"", "m", "5"};
+    const char *harteSuffixes[] = {"", ":min", ":(1,5)"};
+    m_scoreGroups.assign(m_chordnames.size(), -1);
+    m_weakEligible.assign(m_chordnames.size(), false);
+    m_weakChorddict.clear();
+    if (m_weakThird > 0.f) m_weakChorddict = m_chorddict;
+
+    for (size_t state = 0; state < m_chordnames.size(); ++state) {
+        for (int group = 0; group < 3; ++group) {
+            for (int root = 0; root < 12; ++root) {
+                const string expected = string(roots[root]) +
+                    (m_harte_syntax == 1.f ? harteSuffixes[group] : suffixes[group]);
+                if (m_chordnames[state] != expected) continue;
+                m_scoreGroups[state] = 12 * group + root;
+                if (m_weakThird == 0.f || group == 2) continue;
+
+                const int third = (root + (group == 0 ? 4 : 3)) % 12;
+                const int fifth = (root + 7) % 12;
+                bool plainTriad = true;
+                for (int pitch = 0; pitch < 12; ++pitch) {
+                    const bool expectedTone = pitch == root || pitch == third || pitch == fifth;
+                    if ((m_chorddict[24 * state + 12 + pitch] > 0.f) != expectedTone) plainTriad = false;
+                }
+                // A custom dictionary can reuse names with different notes.
+                // Only genuine plain triad templates receive an alternative.
+                if (!plainTriad) continue;
+                m_weakEligible[state] = true;
+                m_weakChorddict[24 * state + third] *= m_weakThird;
+                m_weakChorddict[24 * state + 12 + third] *= m_weakThird;
+                double squaredNorm = 0;
+                for (int bin = 0; bin < 24; ++bin) {
+                    const double value = m_weakChorddict[24 * state + bin];
+                    squaredNorm += value * value / 24;
+                }
+                const double norm = sqrt(squaredNorm);
+                for (int bin = 0; bin < 24; ++bin) {
+                    m_weakChorddict[24 * state + bin] /= norm;
+                }
+            }
+        }
+    }
 }
 
 void
@@ -529,6 +656,17 @@ Chordino::getRemainingFeatures()
         vector<double> currentChordSalience;
         double tempchordvalue = 0;
         double sumchordvalue = 0;
+        Feature diagnosticScores;
+        if (m_diagnostics) {
+            Feature diagnosticChroma;
+            diagnosticChroma.hasTimestamp = true;
+            diagnosticChroma.timestamp = currentChromas.timestamp;
+            diagnosticChroma.values = chroma;
+            fsOut[m_outputDecoderChroma].push_back(diagnosticChroma);
+            diagnosticScores.hasTimestamp = true;
+            diagnosticScores.timestamp = currentChromas.timestamp;
+            diagnosticScores.values.assign(36, 0.f);
+        }
 	        
         for (int iChord = 0; iChord < nChord; iChord++) {
             tempchordvalue = 0;
@@ -537,6 +675,17 @@ Chordino::getRemainingFeatures()
             }
             for (int iBin = 12; iBin < 24; iBin++) {
                 tempchordvalue += m_chorddict[24 * iChord + iBin] * chroma[iBin];
+            }
+            if (m_weakThird > 0.f && m_weakEligible[iChord]) {
+                double weakScore = 0;
+                for (int iBin = 0; iBin < 24; ++iBin) {
+                    weakScore += m_weakChorddict[24 * iChord + iBin] * chroma[iBin];
+                }
+                tempchordvalue = max(tempchordvalue, weakScore);
+            }
+            if (m_diagnostics && m_scoreGroups[iChord] >= 0) {
+                float &score = diagnosticScores.values[m_scoreGroups[iChord]];
+                score = max(score, static_cast<float>(tempchordvalue));
             }
             if (iChord == nChord-1) tempchordvalue *= .7;
             if (tempchordvalue < 0) tempchordvalue = 0.0;
@@ -567,6 +716,7 @@ Chordino::getRemainingFeatures()
             currentChordSalience[nChord-1] = 1.0;
         }
         chordogram.push_back(currentChordSalience);
+        if (m_diagnostics) fsOut[m_outputTriadScores].push_back(diagnosticScores);
 	        
         count++;
     }

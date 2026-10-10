@@ -65,7 +65,7 @@ int main() {
         }
         {
             DecoderProbe plugin;
-            require(plugin.getPluginVersion() == 6, "fork version");
+            require(plugin.getPluginVersion() == 7, "experimental fork version");
             require(plugin.getRemainingFeatures().empty(), "empty input output");
         }
         {
