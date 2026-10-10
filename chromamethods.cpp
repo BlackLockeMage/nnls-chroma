@@ -26,13 +26,10 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstdio>
-#include <boost/tokenizer.hpp>
-#include <boost/iostreams/device/file.hpp>
-#include <boost/iostreams/stream.hpp>
-#include <boost/lexical_cast.hpp>
+#include <cerrno>
+#include <limits>
 
 using namespace std;
-using namespace boost;
 
 
 /** Special Convolution
@@ -75,7 +72,7 @@ float cospuls(float x, float centre, float width)
 {
     float recipwidth = 1.0/width;
     if (abs(x - centre) <= 0.5 * width) {
-        return cos((x-centre)*2*M_PI*recipwidth)*.5+.5;
+        return cos((x-centre)*2*3.14159265358979323846*recipwidth)*.5+.5;
     }
     return 0.0;
 }
@@ -331,7 +328,9 @@ static vector<float> staticChordvalues() {
     0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,1,0,0,0,0,
     0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,0,0,1,0};
-    for (int iChord = 0; iChord < 18; ++iChord) {
+    const size_t valueCount = sizeof(chordvaluearray) / sizeof(chordvaluearray[0]);
+    assert(valueCount % 24 == 0);
+    for (size_t iChord = 0; iChord < valueCount / 24; ++iChord) {
         for (int iNote = 0; iNote < 24; iNote++) {
             chordvalues.push_back(chordvaluearray[24*iChord+iNote]);
         }
@@ -339,11 +338,120 @@ static vector<float> staticChordvalues() {
     return chordvalues;
 }
 
-vector<string> chordDictionary(vector<float> *mchorddict, vector<vector<int> > *m_chordnotes, float boostN, float harte_syntax) {    
-    
-    typedef tokenizer<char_separator<char> > Tok;
-    char_separator<char> sep(",; ","=");
+namespace {
 
+string trimDictionaryField(const string &field) {
+    const string whitespace(" \t\r\n");
+    const size_t first = field.find_first_not_of(whitespace);
+    if (first == string::npos) return "";
+    return field.substr(first, field.find_last_not_of(whitespace) - first + 1);
+}
+
+// Parse a complete dictionary before publishing it: a malformed or empty file
+// must not leave the decoder with short vectors or only a no-chord state.
+bool readChordDictionary(const string &filename, vector<string> &names,
+                         vector<float> &values) {
+    ifstream input(filename.c_str());
+    if (!input.is_open()) return false;
+    vector<string> parsedNames;
+    vector<float> parsedValues;
+    string line;
+    size_t lineNumber = 0;
+    string error;
+    while (getline(input, line)) {
+        ++lineNumber;
+        line = trimDictionaryField(line);
+        if (line.empty() || line[0] == '#') continue;
+        const size_t equals = line.find('=');
+        if (equals == string::npos || line.find('=', equals + 1) != string::npos) {
+            error = "expected one '=' separating the chord name and 24 weights";
+            break;
+        }
+        const string name = trimDictionaryField(line.substr(0, equals));
+        string weights = line.substr(equals + 1);
+        for (size_t i = 0; i < weights.size(); ++i) {
+            if (weights[i] == ',' || weights[i] == ';') weights[i] = ' ';
+        }
+        istringstream tokens(weights);
+        vector<float> row;
+        string token;
+        while (tokens >> token) {
+            char *end = 0;
+            errno = 0;
+            const double value = strtod(token.c_str(), &end);
+            if (end == token.c_str() || *end != '\0' || errno == ERANGE ||
+                !std::isfinite(value) || value < 0 ||
+                value > numeric_limits<float>::max()) {
+                error = "weights must be finite nonnegative numbers";
+                break;
+            }
+            row.push_back(static_cast<float>(value));
+        }
+        if (!error.empty()) break;
+        if (row.size() != 24) {
+            error = "each chord requires exactly 24 weights";
+            break;
+        }
+        // The historic bass expansion uses only unit bass weights. Reject a
+        // row that would become all zero and cause division by zero later.
+        bool usable = false;
+        for (size_t i = 0; i < 24; ++i) {
+            if ((i < 12 && row[i] == 1) || (i >= 12 && row[i] > 0)) usable = true;
+        }
+        if (!usable) {
+            error = "chord template has no usable positive weights";
+            break;
+        }
+        parsedNames.push_back(name);
+        parsedValues.insert(parsedValues.end(), row.begin(), row.end());
+    }
+    if (input.bad()) error = "could not read the complete file";
+    if (error.empty() && parsedNames.empty()) error = "dictionary contains no chord templates";
+    if (!error.empty()) {
+        cerr << "Chordino: invalid dictionary " << filename << ":" << lineNumber
+             << " (" << error << "); using built-in templates." << endl;
+        return false;
+    }
+    names.swap(parsedNames);
+    values.swap(parsedValues);
+    return true;
+}
+
+void appendExtendedChordTemplates(vector<string> &names, vector<float> &values,
+                                  bool harteSyntax) {
+    struct Template {
+        const char *name;
+        const char *harteName;
+        int intervals[4];
+        size_t count;
+    };
+    const Template templates[] = {
+        {"sus2", ":sus2", {0, 2, 7, 0}, 3},
+        {"sus4", ":sus4", {0, 5, 7, 0}, 3},
+        {"add9", ":maj(9)", {0, 2, 4, 7}, 4},
+        {"5", ":(1,5)", {0, 7, 0, 0}, 2}
+    };
+    for (size_t i = 0; i < sizeof(templates) / sizeof(templates[0]); ++i) {
+        const Template &definition = templates[i];
+        vector<float> row(24, 0.f);
+        row[0] = 1.f;
+        for (size_t note = 0; note < definition.count; ++note) {
+            row[12 + definition.intervals[note]] = 1.f;
+        }
+        names.push_back(harteSyntax ? definition.harteName : definition.name);
+        values.insert(values.end(), row.begin(), row.end());
+    }
+}
+
+} // namespace
+
+vector<string> chordDictionary(vector<float> *mchorddict, vector<vector<int> > *m_chordnotes,
+                               float boostN, float harte_syntax) {
+    return chordDictionary(mchorddict, m_chordnotes, boostN, harte_syntax, false);
+}
+
+vector<string> chordDictionary(vector<float> *mchorddict, vector<vector<int> > *m_chordnotes,
+                               float boostN, float harte_syntax, bool extendedTemplates) {
     string chordDictBase("chord.dict");
     string chordDictFilename;
 
@@ -391,52 +499,25 @@ vector<string> chordDictionary(vector<float> *mchorddict, vector<vector<int> > *
         }
     }
 
-    iostreams::stream<iostreams::file_source> chordDictFile(chordDictFilename);
-    string line;
-    // int iElement = 0;
     int nChord = 0;
-	
-	vector<float> tempChordDict = staticChordvalues();
+    vector<float> tempChordDict = staticChordvalues();
     vector<string> tempChordNames = staticChordnames();
-	if (harte_syntax == 1.0) {
-		tempChordNames.erase(tempChordNames.begin(),tempChordNames.begin()+tempChordNames.size()/2);
-	} else {
-		tempChordNames.erase(tempChordNames.begin()+tempChordNames.size()/2,tempChordNames.begin()+tempChordNames.size());
-	}
+    const size_t typeCount = tempChordDict.size() / 24;
+    assert(tempChordNames.size() == typeCount * 2);
+    if (harte_syntax == 1.0) {
+        tempChordNames.erase(tempChordNames.begin(), tempChordNames.begin() + typeCount);
+    } else {
+        tempChordNames.resize(typeCount);
+    }
+    if (extendedTemplates) {
+        appendExtendedChordTemplates(tempChordNames, tempChordDict, harte_syntax == 1.0);
+    }
+    if (hasExternalDictinoary) {
+        readChordDictionary(chordDictFilename, tempChordNames, tempChordDict);
+    }
 
     vector<string> loadedChordNames;
     vector<float> loadedChordDict;
-    if (hasExternalDictinoary && chordDictFile.is_open()) {
-        tempChordDict.clear();
-        tempChordNames.clear();
-        while (std::getline(chordDictFile, line)) { // loop over lines in chord.dict file	            	
-            // first, get the chord definition
-            string chordType;
-            vector<float> tempPCVector;			
-            // cerr << line << endl;
-            if (!line.empty() && line.substr(0,1) != "#") {
-                Tok tok(line, sep);			
-                for(Tok::iterator tok_iter = tok.begin(); tok_iter != tok.end(); ++tok_iter) { // loop over line elements
-                    string tempString = *tok_iter;
-                    // cerr << tempString << endl;
-                    if (tok_iter == tok.begin()) { // either the chord name or a colon                        
-                        if (tempString == "=") {
-                            chordType = "";
-                        } else {
-                            chordType = tempString;
-                            tok_iter++;                            
-                        }
-                    } else {
-                        tempChordDict.push_back(lexical_cast<float>(*tok_iter));
-                    }
-                }                
-                tempChordNames.push_back(chordType);
-            }
-        }
-        cerr << "-----------------> " << tempChordNames.size() << endl;
-    }
-    
-        
     for (int iType = 0; iType < (int)tempChordNames.size(); ++iType) {
         // now make all 12 chords of every type
         for (int iSemitone = 0; iSemitone < 12; iSemitone++) {	
@@ -492,37 +573,25 @@ vector<string> chordDictionary(vector<float> *mchorddict, vector<vector<int> > *
     for (int kSemitone = 0; kSemitone < 12; kSemitone++) loadedChordDict.push_back(1.0);
     vector<int> tempchordvector;
     m_chordnotes->push_back(tempchordvector);
-    float exponent = 2.0;
-    // float m_boostN = 1.1;
-    // cerr << " N BOOST : " << boostN << endl << endl;
-    for (int iChord = 0; iChord < (int)loadedChordDict.size()/24; iChord++) {
-        float sum = 0;
-        float stand = 0;
-        for (int iST = 0; iST < 24; ++iST) {
-            sum += loadedChordDict[24 * iChord + iST];
+    // Accumulate in double so valid, large finite custom weights cannot
+    // overflow while being squared and silently produce a zero template.
+    for (size_t iChord = 0; iChord < loadedChordDict.size() / 24; ++iChord) {
+        double squaredNorm = 0;
+        for (size_t iST = 0; iST < 24; ++iST) {
+            const double value = loadedChordDict[24 * iChord + iST];
+            squaredNorm += value * value / 24;
         }
-        for (int iST = 0; iST < 24; ++iST) {
-            // loadedChordDict[24 * iChord + iST] -= sum/24;
-            stand += pow(abs(loadedChordDict[24 * iChord + iST]),exponent)/24;
+        double scale = sqrt(squaredNorm);
+        if (iChord == loadedChordDict.size() / 24 - 1) scale /= (1 + boostN);
+        for (size_t iST = 0; iST < 24; ++iST) {
+            loadedChordDict[24 * iChord + iST] /= scale;
         }
-        if (iChord < (int)loadedChordDict.size()/24 - 1) {
-            stand = powf(stand,1.0f/exponent);
-        } else {
-            stand = powf(stand,1.0f/exponent) / (1+boostN);
-        }
-        for (int iST = 0; iST < 24; ++iST) {
-            loadedChordDict[24 * iChord + iST] /= stand;            
-        }
-        
     }
-    
-
 
     nChord = 0;
     for (int i = 0; i < (int)loadedChordNames.size(); i++) {
         nChord++;
     }
-    chordDictFile.close();
 
 
     // mchorddict = new float[nChord*24];

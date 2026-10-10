@@ -1,0 +1,6 @@
+.build/
+.build-cache/
+test-build/
+*.o
+*.dll
+*.exe

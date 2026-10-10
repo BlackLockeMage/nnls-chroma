@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "compiler": {
+    "name": "LLVM MinGW UCRT x86_64",
+    "version": "20261006",
+    "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-x86_64.zip",
+    "archive": "llvm-mingw-20261006-ucrt-x86_64.zip",
+    "directory": "llvm-mingw-20261006-ucrt-x86_64",
+    "sha256": "317492c456aa27ee607a5919f1d2d38dcdc1112516a24d0bf4b00d078f52d17a"
+  },
+  "runtime_licenses": [
+    {
+      "file": "libcxx-LICENSE.TXT",
+      "source": "https://github.com/llvm/llvm-project/blob/0d261d1ca552c95a8f007e061c787ac7132fbcbc/libcxx/LICENSE.TXT",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b"
+    },
+    {
+      "file": "libunwind-LICENSE.TXT",
+      "source": "https://github.com/llvm/llvm-project/blob/0d261d1ca552c95a8f007e061c787ac7132fbcbc/libunwind/LICENSE.TXT",
+      "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+    },
+    {
+      "file": "compiler-rt-LICENSE.TXT",
+      "source": "https://github.com/llvm/llvm-project/blob/0d261d1ca552c95a8f007e061c787ac7132fbcbc/compiler-rt/LICENSE.TXT",
+      "sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d"
+    }
+  ],
+  "vamp_sdk": {
+    "name": "Vamp Plugin SDK",
+    "version": "2.10.0",
+    "commit": "63e0c3b37b6fb9ce6f074ea8222b4903e4f5568a",
+    "url": "https://codeload.github.com/c4dm/vamp-plugin-sdk/zip/63e0c3b37b6fb9ce6f074ea8222b4903e4f5568a",
+    "archive": "vamp-plugin-sdk-63e0c3b37b6fb9ce6f074ea8222b4903e4f5568a.zip",
+    "directory": "vamp-plugin-sdk-63e0c3b37b6fb9ce6f074ea8222b4903e4f5568a",
+    "sha256": "d1a875a0080a830940d8cde60bd2aa6e95154cae5c872ead8b1fa4303092cd97"
+  }
+}

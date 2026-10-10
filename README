@@ -1,3 +1,6 @@
+Dechorder fork: see FORK.md for version 6 changes, known limits, and the
+reproducible Windows build. The original plugin documentation follows.
+
 ### NNLS Chroma ###
 
 System identifier – vamp:nnls-chroma:nnls-chroma

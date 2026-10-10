@@ -81,7 +81,7 @@ NNLSBase::getPluginVersion() const
     if (debug_on) cerr << "--> getPluginVersion" << endl;
     // Increment this each time you release a version that behaves
     // differently from the previous one
-    return 5;
+    return 6;
 }
 
 string
@@ -453,7 +453,10 @@ NNLSBase::baseProcess(const float *const *inputBuffers, Vamp::RealTime timestamp
                                fbuf[2 * iBin + 1] * fbuf[2 * iBin + 1]);
         if (magnitude[iBin]>m_blockSize*1.0) magnitude[iBin] = m_blockSize; // a valid audio signal (between -1 and 1) should not be limited here.
         if (maxmag < magnitude[iBin]) maxmag = magnitude[iBin];
-        if (m_rollon > 0) {
+        // The cumulative roll-on below starts at bin 2. Exclude DC and the
+        // first bin from its reference energy as well, or a DC offset can
+        // make the threshold unreachable and erase the entire spectrum.
+        if (m_rollon > 0 && iBin >= 2) {
             energysum += pow(magnitude[iBin],2);
         }
     }
@@ -494,13 +497,25 @@ NNLSBase::baseProcess(const float *const *inputBuffers, Vamp::RealTime timestamp
     // update means of complex tuning variables
     for (int iBPS = 0; iBPS < nBPS; ++iBPS) m_meanTunings[iBPS] *= float(m_frameCount-1)*one_over_N;
     
+    vector<float> frameTunings(nBPS, 0.f);
+    int tuningToneCount = 0;
     for (int iTone = 0; iTone < round(nNote*0.62/nBPS)*nBPS+1; iTone = iTone + nBPS) {
+        ++tuningToneCount;
         for (int iBPS = 0; iBPS < nBPS; ++iBPS) m_meanTunings[iBPS] += nm[iTone + iBPS]*one_over_N;
-        float ratioOld = 0.997;
         for (int iBPS = 0; iBPS < nBPS; ++iBPS) {
-            m_localTunings[iBPS] *= ratioOld; 
-            m_localTunings[iBPS] += nm[iTone + iBPS] * (1 - ratioOld);
+            frameTunings[iBPS] += nm[iTone + iBPS];
         }
+    }
+    // Aggregate pitch evidence before applying temporal decay. Decaying
+    // inside the pitch loop gives the higher pitches more weight solely
+    // because they are visited later. Preserve the old effective per-frame
+    // retention (0.997^54 with the current range), so this correction does
+    // not also change the local tuning response time.
+    const float perToneRetention = 0.997f;
+    const float frameRetention = pow(perToneRetention, tuningToneCount);
+    for (int iBPS = 0; iBPS < nBPS; ++iBPS) {
+        m_localTunings[iBPS] = frameRetention * m_localTunings[iBPS] +
+            (1.f - frameRetention) * frameTunings[iBPS] / tuningToneCount;
     }
     // if (m_tuneLocal) {
     // local tuning

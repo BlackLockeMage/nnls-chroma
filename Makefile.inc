@@ -4,7 +4,7 @@ PLUGIN_LIBRARY_NAME = nnls-chroma
 PLUGIN_CODE_OBJECTS = chromamethods.o NNLSBase.o NNLSChroma.o Chordino.o Tuning.o plugins.o nnls.o viterbi.o
 
 CFLAGS += $(ARCHFLAGS) $(OPTFLAGS) -I$(VAMP_SDK_DIR) -Wall -fPIC
-CXXFLAGS += $(ARCHFLAGS) $(OPTFLAGS) -I$(VAMP_SDK_DIR) -I$(BOOST_ROOT) -Wall -fPIC
+CXXFLAGS += $(ARCHFLAGS) $(OPTFLAGS) -std=c++11 -I$(VAMP_SDK_DIR) -Wall -fPIC
 
 PLUGIN = $(PLUGIN_LIBRARY_NAME)$(PLUGIN_EXT)
 

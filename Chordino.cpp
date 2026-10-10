@@ -33,7 +33,8 @@ Chordino::Chordino(float inputSampleRate) :
     NNLSBase(inputSampleRate),
     m_chorddict(0),
     m_chordnotes(0),
-    m_chordnames(0)    
+    m_chordnames(0),
+    m_extendedTemplates(true)
 {
     if (debug_on) cerr << "--> Chordino" << endl;
 }
@@ -61,7 +62,13 @@ string
 Chordino::getDescription() const
 {
     if (debug_on) cerr << "--> getDescription" << endl;
-    return "Chordino provides a simple chord transcription based on NNLS Chroma (as in the NNLS Chroma plugin). Chord profiles given by the user in the file chord.dict are used to calculate frame-wise chord similarities. A simple (non-state-of-the-art!) algorithm smooths these to provide a chord transcription using a standard HMM/Viterbi approach.";
+    return "Dechorder's Chordino fork provides NNLS Chroma chord transcription with explicit no-evidence silence handling, unbiased first-frame decoding, and coalesced chord labels. Chord profiles are compared frame by frame and smoothed using an HMM/Viterbi decoder.";
+}
+
+int
+Chordino::getPluginVersion() const
+{
+    return 6;
 }
 
 Chordino::ParameterList
@@ -156,7 +163,38 @@ Chordino::getParameterDescriptors() const
     usehartesyntaxParam.valueNames.push_back("yes");
     list.push_back(usehartesyntaxParam);
 
+    ParameterDescriptor extendedParam;
+    extendedParam.identifier = "extendedchords";
+    extendedParam.name = "include suspended, add9 and power chords";
+    extendedParam.description = "Add sus2, sus4, add9 and power-chord templates to the built-in vocabulary. A custom chord.dict still defines its own complete vocabulary.";
+    extendedParam.unit = "";
+    extendedParam.minValue = 0.0;
+    extendedParam.maxValue = 1.0;
+    extendedParam.defaultValue = 1.0;
+    extendedParam.isQuantized = true;
+    extendedParam.quantizeStep = 1.0;
+    extendedParam.valueNames.push_back("no");
+    extendedParam.valueNames.push_back("yes");
+    list.push_back(extendedParam);
+
     return list;
+}
+
+float
+Chordino::getParameter(string identifier) const
+{
+    if (identifier == "extendedchords") return m_extendedTemplates ? 1.f : 0.f;
+    return NNLSBase::getParameter(identifier);
+}
+
+void
+Chordino::setParameter(string identifier, float value)
+{
+    if (identifier == "extendedchords") {
+        m_extendedTemplates = value >= 0.5f;
+        return;
+    }
+    NNLSBase::setParameter(identifier, value);
 }
 
 Chordino::OutputList
@@ -246,7 +284,8 @@ Chordino::initialise(size_t channels, size_t stepSize, size_t blockSize)
     if (!NNLSBase::initialise(channels, stepSize, blockSize)) {
         return false;
     }
-    m_chordnames = chordDictionary(&m_chorddict, &m_chordnotes, m_boostN, m_harte_syntax);
+    m_chordnames = chordDictionary(&m_chorddict, &m_chordnotes, m_boostN,
+                                  m_harte_syntax, m_extendedTemplates);
     return true;
 }
 
@@ -512,7 +551,15 @@ Chordino::getRemainingFeatures()
             sumchordvalue += tempchordvalue;
             currentChordSalience.push_back(tempchordvalue);
         }
-        if (sumchordvalue > 0) {
+        if (!some_b_greater_zero) {
+            // A zero spectrum is evidence for no chord, not an equally likely
+            // observation of every chord. Uniform emissions let the HMM carry
+            // chords across silence (or introduce a future chord too early).
+            // Reuse the front end's existing evidence gate; add no new level
+            // threshold here.
+            currentChordSalience.assign(nChord, 0.0);
+            currentChordSalience[nChord-1] = 1.0;
+        } else if (sumchordvalue > 0) {
             for (int iChord = 0; iChord < nChord; iChord++) {
                 currentChordSalience[iChord] /= sumchordvalue;
             }
@@ -528,11 +575,12 @@ Chordino::getRemainingFeatures()
     vector<Feature> oldnotes;
 
     if (debug_on) cerr << "[Chordino Plugin] HMM Chord Estimation ... ";
-    int oldchord = nChord-1;
+    int oldchord = -1;
     double selftransprob = 0.99;
  
-    // vector<double> init = vector<double>(nChord,1.0/nChord);
-    vector<double> init = vector<double>(nChord,0); init[nChord-1] = 1;
+    // Let the audio choose the first state. A forced N prior cannot be
+    // overturned by any amount of first-frame chord evidence.
+    vector<double> init = vector<double>(nChord,1.0/nChord);
     
     double *delta;
     delta = (double *)malloc(sizeof(double)*nFrame*nChord);                
@@ -546,22 +594,20 @@ Chordino::getRemainingFeatures()
     vector<double> scale;
     vector<int> chordpath = ViterbiPath(init, trans, chordogram, delta, &scale);
     
-    Feature chord_feature; // chord estimate
-    chord_feature.hasTimestamp = true;
-    chord_feature.timestamp = timestamps[0];
-    chord_feature.label = m_chordnames[chordpath[0]];
-    fsOut[m_outputChords].push_back(chord_feature);
-    
     chordchange[0] = 0;
-    for (int iFrame = 1; iFrame < (int)chordpath.size(); ++iFrame) {
+    for (int iFrame = 0; iFrame < (int)chordpath.size(); ++iFrame) {
         if (chordpath[iFrame] != oldchord ) {
-            // chord
-            Feature chord_feature; // chord estimate
-            chord_feature.hasTimestamp = true;
-            chord_feature.timestamp = timestamps[iFrame];
-            chord_feature.label = m_chordnames[chordpath[iFrame]];
-            fsOut[m_outputChords].push_back(chord_feature);
-            oldchord = chordpath[iFrame];         
+            // Different internal voicings can have the same displayed name.
+            // Emit only real label changes, but retain note-voicing changes.
+            if (oldchord < 0 ||
+                m_chordnames[chordpath[iFrame]] != m_chordnames[oldchord]) {
+                Feature chord_feature;
+                chord_feature.hasTimestamp = true;
+                chord_feature.timestamp = timestamps[iFrame];
+                chord_feature.label = m_chordnames[chordpath[iFrame]];
+                fsOut[m_outputChords].push_back(chord_feature);
+            }
+            oldchord = chordpath[iFrame];
             // chord notes
             for (int iNote = 0; iNote < (int)oldnotes.size(); ++iNote) { // finish duration of old chord
                 oldnotes[iNote].duration = oldnotes[iNote].duration + timestamps[iFrame];
@@ -578,7 +624,8 @@ Chordino::getRemainingFeatures()
                 oldnotes.push_back(chordnote_feature);
             }
         }
-        /* calculating simple chord change prob */            
+        if (iFrame == 0) continue;
+        /* calculating simple chord change prob */
         for (int iChord = 0; iChord < nChord; iChord++) {
             double num = delta[(iFrame-1) * nChord + iChord];
             double denom = delta[iFrame * nChord + iChord];
@@ -600,13 +647,14 @@ Chordino::getRemainingFeatures()
     }
     logscale /= nFrame;
 
-    chord_feature.hasTimestamp = true;
-    chord_feature.timestamp = timestamps[timestamps.size()-1];
-    chord_feature.label = "N";
-    fsOut[m_outputChords].push_back(chord_feature);
-    
+    // A terminal marker is not an observed N chord. Leave the final label
+    // open for the host to extend to the known audio duration. The Vamp API
+    // does not supply the precise input end here, so bound the note events
+    // by one analysis hop after the last frame timestamp.
+    Vamp::RealTime noteEnd = timestamps.back() +
+        Vamp::RealTime::frame2RealTime(m_stepSize, m_inputSampleRate);
     for (int iNote = 0; iNote < (int)oldnotes.size(); ++iNote) { // finish duration of old chord
-        oldnotes[iNote].duration = oldnotes[iNote].duration + timestamps[timestamps.size()-1];
+        oldnotes[iNote].duration = oldnotes[iNote].duration + noteEnd;
         fsOut[m_outputChordnotes].push_back(oldnotes[iNote]);
     }
     

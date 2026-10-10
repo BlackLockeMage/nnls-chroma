@@ -33,8 +33,11 @@ public:
     string getIdentifier() const;
     string getName() const;
     string getDescription() const;
+    int getPluginVersion() const;
 
     ParameterList getParameterDescriptors() const;
+    float getParameter(string identifier) const;
+    void setParameter(string identifier, float value);
     OutputList getOutputDescriptors() const;
 
     FeatureSet process(const float *const *inputBuffers,
@@ -52,6 +55,7 @@ protected:
     vector<float> m_chorddict;
     vector<vector<int> > m_chordnotes;
     vector<string> m_chordnames;
+    bool m_extendedTemplates;
 };
 
 
