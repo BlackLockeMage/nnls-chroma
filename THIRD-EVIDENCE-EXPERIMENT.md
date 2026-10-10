@@ -1,8 +1,10 @@
-# Experiment only: close-position third evidence
+# Not validated: close-position third evidence
 
-This isolated branch starts at production commit `7c5cd2e`. It is not installed
-or merged into the production branch. Evaluation is pending; this document does
-not claim an accuracy improvement. The linked application experiment is
+**Do not merge or adopt this experiment.** The selected candidate failed the
+preregistered improvement requirement on reserved validation. This isolated
+branch starts at production commit `7c5cd2e` and preserves the tested code for
+reproducibility. It is not installed or merged into production. The linked
+application experiment is
 [Dechorder PR #1](https://github.com/BlackLockeMage/Dechorder/pull/1).
 
 The previous unrestricted weak-third experiment was rejected because it promoted
@@ -73,20 +75,40 @@ Four native suites pass: decoder, dictionary, frontend and third-evidence
 structural/gate checks. They cover exact 84-to-24 reconstruction, finite and
 zero handling, inclusive thresholds, top-of-range bounds, NNLS-only gating,
 root ties, missing fifths, and open-third fallback. They do not establish audio
-accuracy. Disabled-mode parity against production and all enabled-mode accuracy
-checks are evaluated in the linked application PR.
+accuracy. All 110 development disabled-mode raw CSVs (70 challenging and 40
+additional-control fixture/profile pairs) match production byte for byte.
+
+Both finite modes passed the development gates: primary exact and harmonic
+accuracy rose from 91.67% to 100% for both profiles. Mode 2 (ratio >= 0.10) was
+selected under the frozen stricter-threshold tie rule, recorded in
+[application commit 3a55dbc](https://github.com/BlackLockeMage/Dechorder/commit/3a55dbc)
+before reserved validation was decoded. Mode 1 was not decoded on validation.
+
+The selected mode then failed the required validation improvement. Primary
+exact and harmonic accuracy stayed at 91.67% in both Default and Pop, below the
+required gain of at least one percentage point. Validation isolated and
+accompanied power-control accuracy remained 100% and 97.45%, respectively.
+Additional reserved-control accuracy remained 33.33%. Preserving those outputs
+does not satisfy the improvement requirement or fix the existing missed chords.
+
+No further tuning or alternate-mode validation was performed. The enabled
+candidate was not run against the old regression suite after failing validation;
+this experiment makes no claim that an enabled mode preserves every legacy
+case. Production remains unchanged. Detailed paired reports and the mechanical
+verdict are preserved in the linked application PR.
 
 Candidate DLL SHA256:
 `964c643038a894823444cbcde0de813cd9127f172cb27af72965a451b217c3aa`.
 The earlier diagnostic-only DLL SHA256 was
 `dbf5a373fabf08a8493e2ce6ca283d4a9729facd370ba1d39f306ecea6a340b4`.
 
-The application experiment freezes the original 35 challenging development
-files, 20 additional matched voicing/control files, two profiles, and two finite
-candidate modes. Candidate selection precedes any reserved-validation decode.
-No development candidate passing the gates means no validation decode and no
-production change. Bright and octave-spread true-power controls already missed
-by production must be reported even when a candidate merely preserves them.
+The application experiment froze 35 challenging development files, 20
+additional matched voicing/control files, two profiles, and two finite candidate
+modes. Selected mode 2 was evaluated once on the 35 reserved challenging and
+six additional reserved files. In development the additional-suite accuracy
+remained 65% for Default and 70% for Pop. All four brighter,
+missing-fundamental or octave-spread power examples already falsely labelled
+major by production remain unresolved. The gate did not solve those errors.
 
 Use `build-windows.ps1` with separate cache/output directories to build this
 branch and its four native suites. Do not replace the installed production DLL.

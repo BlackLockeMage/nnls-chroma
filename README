@@ -1,4 +1,6 @@
-EXPERIMENT ONLY: register-aware third evidence, Chordino descriptor version 8.
+NOT VALIDATED: register-aware third evidence, Chordino descriptor version 8.
+The selected candidate failed the reserved-validation improvement requirement.
+Do not merge or adopt this experiment. Code is retained for reproducibility.
 See THIRD-EVIDENCE-EXPERIMENT.md for the frozen candidates and evaluation status.
 This branch is not a production release or a verified accuracy upgrade.
 The installed version-6 plugin remains unchanged. FORK.md describes that baseline.
