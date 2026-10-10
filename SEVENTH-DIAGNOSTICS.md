@@ -1,5 +1,10 @@
 # Observational diagnostics for seventh-chord investigation
 
+This document records the inherited version-9 diagnostic baseline. The current
+version-10 experimental branch adds the default-off treatment described in
+SEVENTH-TRANSITIONS.md; claims of unchanged transitions below apply to version 9
+and to version 10 only while `seventhtransition` is zero.
+
 This branch starts directly from production master `7c5cd2e` (audio changes
 through `3ccf28d`). It adds logging and bumps only Chordino's descriptor to
 version 9. NNLS Chroma and Tuning remain version 6. It does not transplant the

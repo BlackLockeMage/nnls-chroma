@@ -1,6 +1,6 @@
-OBSERVATIONAL BUILD: Chordino descriptor version 9, diagnostics disabled by default.
-See SEVENTH-DIAGNOSTICS.md for the exported evidence and parity checks.
-No decoder treatment, weak-third gate or accuracy change is introduced.
+EXPERIMENTAL BUILD: Chordino descriptor version 10; not validated for adoption.
+See SEVENTH-TRANSITIONS.md for the optional, default-off transition treatment.
+SEVENTH-DIAGNOSTICS.md describes the inherited version-9 observational outputs.
 FORK.md documents the production version-6 baseline. The original documentation follows.
 
 ### NNLS Chroma ###

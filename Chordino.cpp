@@ -20,6 +20,7 @@
 
 #include "chromamethods.h"
 #include "viterbi.h"
+#include "seventhtransitions.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -36,7 +37,8 @@ Chordino::Chordino(float inputSampleRate) :
     m_chordnotes(0),
     m_chordnames(0),
     m_extendedTemplates(true),
-    m_diagnostics(false)
+    m_diagnostics(false),
+    m_seventhTransition(0.f)
 {
     if (debug_on) cerr << "--> Chordino" << endl;
 }
@@ -70,7 +72,7 @@ Chordino::getDescription() const
 int
 Chordino::getPluginVersion() const
 {
-    return 9;
+    return 10;
 }
 
 Chordino::ParameterList
@@ -191,6 +193,16 @@ Chordino::getParameterDescriptors() const
     diagnostics.quantizeStep = 1.f;
     list.push_back(diagnostics);
 
+    ParameterDescriptor seventh;
+    seventh.identifier = "seventhtransition";
+    seventh.name = "experimental seventh transition discount";
+    seventh.description = "Fractional log-switch-cost discount only between same-root, same-labelled-bass major/7/maj7 or minor/m7 pairs. Experimental unnormalized transition potentials; zero preserves baseline.";
+    seventh.unit = "";
+    seventh.minValue = 0.f;
+    seventh.maxValue = 1.f;
+    seventh.defaultValue = 0.f;
+    seventh.isQuantized = false;
+    list.push_back(seventh);
     return list;
 }
 
@@ -199,12 +211,17 @@ Chordino::getParameter(string identifier) const
 {
     if (identifier == "extendedchords") return m_extendedTemplates ? 1.f : 0.f;
     if (identifier == "diagnostics") return m_diagnostics ? 1.f : 0.f;
+    if (identifier == "seventhtransition") return m_seventhTransition;
     return NNLSBase::getParameter(identifier);
 }
 
 void
 Chordino::setParameter(string identifier, float value)
 {
+    if (identifier == "seventhtransition") {
+        m_seventhTransition = float(SeventhTransitions::validDiscount(value));
+        return;
+    }
     if (identifier == "diagnostics") {
         m_diagnostics = value >= 0.5f;
         return;
@@ -712,7 +729,6 @@ Chordino::getRemainingFeatures()
 
     if (debug_on) cerr << "[Chordino Plugin] HMM Chord Estimation ... ";
     int oldchord = -1;
-    double selftransprob = 0.99;
  
     // Let the audio choose the first state. A forced N prior cannot be
     // overturned by any amount of first-frame chord evidence.
@@ -721,12 +737,7 @@ Chordino::getRemainingFeatures()
     double *delta;
     delta = (double *)malloc(sizeof(double)*nFrame*nChord);                
     
-    vector<vector<double> > trans;
-    for (int iChord = 0; iChord < nChord; iChord++) {
-        vector<double> temp = vector<double>(nChord,(1-selftransprob)/(nChord-1));            
-        temp[iChord] = selftransprob;
-        trans.push_back(temp);
-    }
+    vector<vector<double> > trans = SeventhTransitions::matrix(m_chordnames, m_seventhTransition);
     vector<double> scale;
     vector<int> chordpath = ViterbiPath(init, trans, chordogram, delta, &scale);
     

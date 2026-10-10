@@ -57,6 +57,7 @@ protected:
     vector<string> m_chordnames;
     bool m_extendedTemplates;
     bool m_diagnostics;
+    float m_seventhTransition;
     mutable int m_outputNoteActivations;
     mutable int m_outputDecoderChroma;
     mutable int m_outputStateRawScores;
