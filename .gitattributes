@@ -1,0 +1,4 @@
+# Keep text assets identical in Windows clones and source archives. In particular,
+# build-licenses checksums are for the original upstream LF bytes.
+* text=auto eol=lf
+build-licenses/* text eol=lf
