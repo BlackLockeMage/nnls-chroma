@@ -26,6 +26,7 @@
 #include <cmath>
 
 #include <algorithm>
+#include <sstream>
 
 const bool debug_on = false;
 
@@ -34,7 +35,8 @@ Chordino::Chordino(float inputSampleRate) :
     m_chorddict(0),
     m_chordnotes(0),
     m_chordnames(0),
-    m_extendedTemplates(true)
+    m_extendedTemplates(true),
+    m_diagnostics(false)
 {
     if (debug_on) cerr << "--> Chordino" << endl;
 }
@@ -68,7 +70,7 @@ Chordino::getDescription() const
 int
 Chordino::getPluginVersion() const
 {
-    return 6;
+    return 9;
 }
 
 Chordino::ParameterList
@@ -177,6 +179,18 @@ Chordino::getParameterDescriptors() const
     extendedParam.valueNames.push_back("yes");
     list.push_back(extendedParam);
 
+    ParameterDescriptor diagnostics;
+    diagnostics.identifier = "diagnostics";
+    diagnostics.name = "emit observational decoder diagnostics";
+    diagnostics.description = "Export exact note/chroma inputs, per-state raw scores and normalized emissions, native state choices and dictionary weights. Does not alter decoding.";
+    diagnostics.unit = "";
+    diagnostics.minValue = 0.f;
+    diagnostics.maxValue = 1.f;
+    diagnostics.defaultValue = 0.f;
+    diagnostics.isQuantized = true;
+    diagnostics.quantizeStep = 1.f;
+    list.push_back(diagnostics);
+
     return list;
 }
 
@@ -184,12 +198,17 @@ float
 Chordino::getParameter(string identifier) const
 {
     if (identifier == "extendedchords") return m_extendedTemplates ? 1.f : 0.f;
+    if (identifier == "diagnostics") return m_diagnostics ? 1.f : 0.f;
     return NNLSBase::getParameter(identifier);
 }
 
 void
 Chordino::setParameter(string identifier, float value)
 {
+    if (identifier == "diagnostics") {
+        m_diagnostics = value >= 0.5f;
+        return;
+    }
     if (identifier == "extendedchords") {
         m_extendedTemplates = value >= 0.5f;
         return;
@@ -270,6 +289,84 @@ Chordino::getOutputDescriptors() const
     loglikelihood.hasDuration = false;
     list.push_back(loglikelihood);
     m_outputLoglikelihood = index++;
+
+    const char *roots[] = {"A", "Bb", "B", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab"};
+    OutputDescriptor diagnostic;
+    diagnostic.identifier = "noteactivations";
+    diagnostic.name = "Octave-Specific Note Activations";
+    diagnostic.description = "84 actual coefficients before chroma weighting/folding: MIDI21..104, A0..G#7. NNLS coefficients with useNNLS=1, direct semitone sums otherwise. Diagnostics only.";
+    diagnostic.unit = "activation";
+    diagnostic.hasFixedBinCount = true;
+    diagnostic.binCount = 84;
+    diagnostic.hasKnownExtents = false;
+    diagnostic.isQuantized = false;
+    diagnostic.sampleType = OutputDescriptor::FixedSampleRate;
+    diagnostic.sampleRate = featureRate;
+    diagnostic.hasDuration = false;
+    for (int note = 0; note < 84; ++note) {
+        ostringstream name;
+        name << roots[note % 12] << ((note + 21) / 12 - 1);
+        diagnostic.binNames.push_back(name.str());
+    }
+    list.push_back(diagnostic);
+    m_outputNoteActivations = index++;
+
+    diagnostic.identifier = "decoderchroma";
+    diagnostic.name = "Decoder Scoring Chroma";
+    diagnostic.description = "24 actual scorer inputs, bass A..Ab then treble A..Ab. Optional display-chroma normalization is not applied. Diagnostics only.";
+    diagnostic.binCount = 24;
+    diagnostic.binNames.clear();
+    for (int band = 0; band < 2; ++band) {
+        for (int root = 0; root < 12; ++root) {
+            diagnostic.binNames.push_back(string(band == 0 ? "bass " : "treble ") + roots[root]);
+        }
+    }
+    const vector<string> chromaBins = diagnostic.binNames;
+    list.push_back(diagnostic);
+    m_outputDecoderChroma = index++;
+
+    diagnostic.identifier = "staterawscores";
+    diagnostic.name = "Per-State Raw Scores";
+    diagnostic.description = "One dot product per state, before N's 0.7 factor, clipping and exponentiation. Zero-based bin index matches statedictionary. Double scores are exported as Vamp float values. Diagnostics only.";
+    diagnostic.unit = "template similarity";
+    // Custom dictionaries and parameter-dependent vocabulary are known after
+    // initialise. Before then report an unspecified bin count.
+    diagnostic.hasFixedBinCount = !m_chordnames.empty();
+    diagnostic.binCount = m_chordnames.size();
+    diagnostic.binNames = m_chordnames;
+    list.push_back(diagnostic);
+    m_outputStateRawScores = index++;
+
+    diagnostic.identifier = "stateemissions";
+    diagnostic.name = "Per-State Normalized Emissions";
+    diagnostic.description = "Actual HMM emissions after N scaling, clipping, exponentiation, zero-evidence silence gate and normalization. Double emissions exported as Vamp float values; indices match statedictionary. Diagnostics only.";
+    diagnostic.unit = "emission";
+    list.push_back(diagnostic);
+    m_outputStateEmissions = index++;
+
+    diagnostic.identifier = "statepath";
+    diagnostic.name = "Native Decoder State Choices";
+    diagnostic.description = "Native Viterbi state and local maximum-emission state for every frame. Local ties select lowest index. Indices match statedictionary; choices use native double precision before float export. Diagnostics only.";
+    diagnostic.unit = "state index";
+    diagnostic.hasFixedBinCount = true;
+    diagnostic.binCount = 2;
+    diagnostic.binNames = {"viterbi_state", "local_emission_winner"};
+    diagnostic.isQuantized = true;
+    diagnostic.quantizeStep = 1.f;
+    list.push_back(diagnostic);
+    m_outputStatePath = index++;
+
+    diagnostic.identifier = "statedictionary";
+    diagnostic.name = "Decoder State Dictionary";
+    diagnostic.description = "One row per state at timestamp zero: state index,24 expanded normalized weights (bass A..Ab,treble A..Ab), and exact state label in the feature label. N weights include boostn; its later 0.7 score multiplier is separate. Diagnostics only.";
+    diagnostic.unit = "";
+    diagnostic.binCount = 25;
+    diagnostic.binNames = {"state_index"};
+    diagnostic.binNames.insert(diagnostic.binNames.end(), chromaBins.begin(), chromaBins.end());
+    diagnostic.isQuantized = false;
+    diagnostic.sampleType = OutputDescriptor::VariableSampleRate;
+    list.push_back(diagnostic);
+    m_outputStateDictionary = index++;
   
     return list;
 }
@@ -314,6 +411,18 @@ Chordino::getRemainingFeatures()
     FeatureSet fsOut;
     if (m_logSpectrum.size() == 0) return fsOut;
     int nChord = m_chordnames.size();
+    if (m_diagnostics) {
+        for (int state = 0; state < nChord; ++state) {
+            Feature entry;
+            entry.hasTimestamp = true;
+            entry.timestamp = Vamp::RealTime::zeroTime;
+            entry.label = m_chordnames[state];
+            entry.values.push_back(float(state));
+            entry.values.insert(entry.values.end(), m_chorddict.begin() + 24 * state,
+                                m_chorddict.begin() + 24 * (state + 1));
+            fsOut[m_outputStateDictionary].push_back(entry);
+        }
+    }
     // 
     /**  Calculate Tuning
          calculate tuning from (using the angle of the complex number defined by the 
@@ -438,6 +547,7 @@ Chordino::getRemainingFeatures()
 	
         vector<float> chroma = vector<float>(12, 0);
         vector<float> basschroma = vector<float>(12, 0);
+        vector<float> noteActivation(m_diagnostics ? 84 : 0, 0.f);
         float currval;
         int iSemitone = 0;
 			
@@ -450,6 +560,7 @@ Chordino::getRemainingFeatures()
                     }
                     chroma[iSemitone % 12] += currval * treblewindow[iSemitone];
                     basschroma[iSemitone % 12] += currval * basswindow[iSemitone];
+                    if (m_diagnostics) noteActivation[iSemitone] = currval;
                     iSemitone++;
                 }
 		        
@@ -486,6 +597,7 @@ Chordino::getRemainingFeatures()
                     // cerr << mode << endl;
                     chroma[signifIndex[iNote] % 12] += x[iNote] * treblewindow[signifIndex[iNote]];
                     basschroma[signifIndex[iNote] % 12] += x[iNote] * basswindow[signifIndex[iNote]];
+                    if (m_diagnostics) noteActivation[signifIndex[iNote]] = x[iNote];
                 }
             }	
         }
@@ -529,6 +641,21 @@ Chordino::getRemainingFeatures()
         vector<double> currentChordSalience;
         double tempchordvalue = 0;
         double sumchordvalue = 0;
+        Feature rawScores;
+        if (m_diagnostics) {
+            Feature notes;
+            notes.hasTimestamp = true;
+            notes.timestamp = currentChromas.timestamp;
+            notes.values = noteActivation;
+            fsOut[m_outputNoteActivations].push_back(notes);
+            Feature inputs;
+            inputs.hasTimestamp = true;
+            inputs.timestamp = currentChromas.timestamp;
+            inputs.values = chroma;
+            fsOut[m_outputDecoderChroma].push_back(inputs);
+            rawScores.hasTimestamp = true;
+            rawScores.timestamp = currentChromas.timestamp;
+        }
 	        
         for (int iChord = 0; iChord < nChord; iChord++) {
             tempchordvalue = 0;
@@ -538,6 +665,7 @@ Chordino::getRemainingFeatures()
             for (int iBin = 12; iBin < 24; iBin++) {
                 tempchordvalue += m_chorddict[24 * iChord + iBin] * chroma[iBin];
             }
+            if (m_diagnostics) rawScores.values.push_back(float(tempchordvalue));
             if (iChord == nChord-1) tempchordvalue *= .7;
             if (tempchordvalue < 0) tempchordvalue = 0.0;
             if (tempchordvalue > 200.0) {
@@ -567,6 +695,14 @@ Chordino::getRemainingFeatures()
             currentChordSalience[nChord-1] = 1.0;
         }
         chordogram.push_back(currentChordSalience);
+        if (m_diagnostics) {
+            fsOut[m_outputStateRawScores].push_back(rawScores);
+            Feature emissions;
+            emissions.hasTimestamp = true;
+            emissions.timestamp = currentChromas.timestamp;
+            emissions.values.assign(currentChordSalience.begin(), currentChordSalience.end());
+            fsOut[m_outputStateEmissions].push_back(emissions);
+        }
 	        
         count++;
     }
@@ -596,6 +732,16 @@ Chordino::getRemainingFeatures()
     
     chordchange[0] = 0;
     for (int iFrame = 0; iFrame < (int)chordpath.size(); ++iFrame) {
+        if (m_diagnostics) {
+            Feature path;
+            path.hasTimestamp = true;
+            path.timestamp = timestamps[iFrame];
+            path.values.push_back(float(chordpath[iFrame]));
+            const int localWinner = int(max_element(chordogram[iFrame].begin(),
+                chordogram[iFrame].end()) - chordogram[iFrame].begin());
+            path.values.push_back(float(localWinner));
+            fsOut[m_outputStatePath].push_back(path);
+        }
         if (chordpath[iFrame] != oldchord ) {
             // Different internal voicings can have the same displayed name.
             // Emit only real label changes, but retain note-voicing changes.

@@ -56,6 +56,13 @@ protected:
     vector<vector<int> > m_chordnotes;
     vector<string> m_chordnames;
     bool m_extendedTemplates;
+    bool m_diagnostics;
+    mutable int m_outputNoteActivations;
+    mutable int m_outputDecoderChroma;
+    mutable int m_outputStateRawScores;
+    mutable int m_outputStateEmissions;
+    mutable int m_outputStatePath;
+    mutable int m_outputStateDictionary;
 };
 
 
