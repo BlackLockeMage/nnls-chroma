@@ -1,5 +1,8 @@
-Dechorder fork: see FORK.md for version 6 changes, known limits, and the
-reproducible Windows build. The original plugin documentation follows.
+EXPERIMENT ONLY: register-aware third evidence, Chordino descriptor version 8.
+See THIRD-EVIDENCE-EXPERIMENT.md for the frozen candidates and evaluation status.
+This branch is not a production release or a verified accuracy upgrade.
+The installed version-6 plugin remains unchanged. FORK.md describes that baseline.
+The original plugin documentation follows.
 
 ### NNLS Chroma ###
 

@@ -83,7 +83,7 @@ foreach ($relativePath in @('src/vamp-sdk/PluginAdapter.cpp', 'src/vamp-sdk/Real
 
 # Keep decoder and dictionary regression checks coupled to the built sources.
 # C++17 is needed only by the dictionary test's temporary-directory handling.
-foreach ($testName in @('test_decoder', 'test_dictionary', 'test_frontend')) {
+foreach ($testName in @('test_decoder', 'test_dictionary', 'test_frontend', 'test_weakthird')) {
     $testExecutable = Join-Path $workRoot ($testName + '.exe')
     $testSource = Join-Path $sourceRoot ('tests/' + $testName + '.cpp')
     $testObjects = $objects | Where-Object { [IO.Path]::GetFileName($_) -ne 'plugins.cpp.o' }
