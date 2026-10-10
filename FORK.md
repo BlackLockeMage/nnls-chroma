@@ -52,8 +52,9 @@ operating-system dependencies. Fast-math is deliberately disabled.
 
 Outputs include the DLL, Vamp metadata, original GPL licence, exact SDK and
 runtime licences, and diagnostic `BUILD-INFO.json`. PE timestamps and source
-path prefixes are removed for reproducibility. Source-byte hashes in build info
-can differ between LF and CRLF checkouts; they describe the actual local inputs.
+path prefixes are removed for reproducibility. Git attributes retain LF endings
+for text files on Windows, including the checksum-pinned runtime licences.
+Source-byte hashes in build info describe the actual local inputs.
 
 Native tests live under `tests/`. The independent end-to-end synthetic audio
 suite, comparison runner and evaluation results are maintained in Dechorder.

@@ -1,5 +1,11 @@
 # Native regression tests
 
+On Windows x64, `./build-windows.ps1` downloads the pinned local compiler and SDK,
+then builds and runs all three suites before producing the plugin. This is the
+recommended command for a fresh clone; no preinstalled compiler or PATH changes
+are required. Use `-CacheDirectory` to reuse existing downloads. The dictionary
+test uses C++17 for its temporary-directory handling; the plugin itself uses C++11.
+
 `test_decoder.cpp` exercises Chordino through its native plugin API, with known
 spectral inputs. It checks empty and single-frame recordings, no-evidence silence,
 the initial chord prior, chord-note durations, the extended-vocabulary switch,
